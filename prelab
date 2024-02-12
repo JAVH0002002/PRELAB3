@@ -1,0 +1,291 @@
+.include "M328PDEF.inc"  ; Incluye el archivo de definiciones para el ATmega328P_3
+.CSEG  ; Segmento de código
+
+.ORG 0x0000  ; Dirección de inicio del programa
+
+; Configuración del puntero de pila 
+LDI R16, LOW(RAMEND)  ; Carga el byte menos significativo de la dirección de fin de RAM en R16
+OUT SPL, R16  ; Configura el puntero de pila en la dirección de fin de RAM
+LDI R17, HIGH(RAMEND)  ; Carga el byte más significativo de la dirección de fin de RAM en R17
+OUT SPH, R17  ; Configura el puntero de pila en la dirección de fin de RAM
+
+setup:
+	; Configuración de los registros de prescaler del reloj
+	LDI R16, 0b1000_0000  ; Habilita la modificación del registro CLKPR
+	LDI R16, (1 << CLKPCE)  ; Configura el registro de prescaler del reloj
+	STS CLKPR, R16  ; Almacena el nuevo valor en el registro CLKPR
+	LDI R16, 0b0000_0100  ; Configura el registro de prescaler del reloj para una frecuencia de 16MHz
+	STS CLKPR, R16  ; Almacena el nuevo valor en el registro CLKPR
+
+	; Configuración de puertos como entrada/salida
+	LDI R16, 0b11111110  ; Configura el puerto D como salida
+	OUT DDRD, R16  ; Establece el registro de dirección del puerto D
+	LDI R16, 0b00000000  ; Configura el puerto B como entrada
+	OUT DDRB, R16  ; Establece el registro de dirección del puerto B
+	LDI R16, 0b00000110  ; Activa las resistencias de pull-up internas en los pines PB1 y PB2
+	OUT PORTB, R16  ; Configura los pines PB1 y PB2 con resistencias de pull-up internas
+
+	LDI R16, 0b00111111  ; Configura el puerto C como salida
+	OUT DDRC, R16  ; Establece el registro de dirección del puerto C
+
+	; Inicialización de registros
+	LDI R18, 0  ; Inicializa R18 en 0
+	LDI R20, 0  ; Inicializa R20 en 0
+	LDI R19, 1  ; Inicializa R19 en 1
+	LDI R23, 1  ; Inicializa R23 en 1
+	LDI R28, 0  ; Inicializa R28 en 0
+	LDI R29, 1  ; Inicializa R29 en 1
+	ldi R31, 0b11111100  ; Inicializa R31 en 0b11111100
+
+CALL timer0  ; Llama timer0
+
+loop:
+	; Lectura del estado de los pines B1 y B2
+	IN R22, PINB  ; Lee el estado de los pines del puerto B
+	SBRS R22, PB2  ; Si el pin PB2 está en bajo, salta a inc_1
+	RJMP inc_1  ; Salta a inc_1
+	SBRS R22, PB1  ; Si el pin PB1 está en bajo, salta a dec_1
+	RJMP dec_1  ; Salta a dec_1
+
+	; Comprobación de la bandera de desbordamiento del Timer0
+	IN R24, TIFR0  ; Lee el registro de flags de Timer0
+	CPI R24, (1<<TOV0)  ; Compara con la bandera de desbordamiento
+	BRNE loop  ; Si no hay desbordamiento, vuelve al bucle principal
+
+	; Establecimiento del valor del contador del Timer0
+	LDI R24, 158  ; Carga el valor de 158 en R24
+	OUT TCNT0,R24  ; Establece el valor del contador del Timer0
+
+	SBI TIFR0, TOV0  ; Limpia la bandera de desbordamiento del Timer0
+
+	; Lógica de incremento
+	INC R18  ; Incrementa R18
+	CPI R18,10  ; Compara R18 con 10
+	BRNE loop  ; Si R18 no es igual a 10, vuelve al bucle principal
+
+	CLR R18  ; Reinicia R18 a 0
+
+	RJMP loop  ; Salta al inicio del bucle principal
+
+timer0: 
+	; Configuración del Timer0
+	LDI R16, 0  ; Carga el valor 0 en R16
+	OUT TCCR0A, R16  ; Configura el modo de operación del Timer0
+
+	LDI R24, (1<<CS02) | (1<<CS00)  ; Carga el valor correspondiente al prescaler en R24
+	OUT TCCR0B, R24  ; Configura el prescaler del Timer0
+
+	LDI R24, 158  ; Carga el valor de 158 en R24
+	OUT TCNT0, R24  ; Establece el valor inicial del contador del Timer0
+
+	RET  ; Retorna de la subrutina timer0
+
+
+inc_1: 
+	LDI R16, 255    ; Cargar el valor máximo de un registro de 8 bits
+delay: 
+	DEC R16         ; Decrementar el registro R16
+	BRNE delay     ; Saltar si R16 no es igual a cero
+	LDI  R16, 255   ; Cargar el valor máximo de un registro de 8 bits nuevamente
+delay1: 
+	DEC R16         ; Decrementar el registro R16
+	BRNE delay1    ; Saltar si R16 no es igual a cero
+	LDI R16, 255    ; Cargar el valor máximo de un registro de 8 bits nuevamente
+delay5:
+	DEC R16         ; Decrementar el registro R16
+	BRNE delay5    ; Saltar si R16 no es igual a cero
+
+	SBIS PINB, PB2   ; Saltar si el pin PB2 está en bajo
+	RJMP inc_1      ; Volver a inc_1
+	CPI R23,5       ; Comparar R23 con 5
+	BRLO inc_2     ; Saltar si R23 es menor que 5
+	CPI R23, 6      ; Comparar R23 con 6
+	brsh inc_3     ; Saltar si R23 es mayor o igual a 6
+
+inc_2: 
+	; Manejo de la tabla 0
+	TABLA: .DB 0x01, 0x02, 0x04, 0x06, 0x08, 0x0A   ; Definir la tabla 0
+	LDI ZH, HIGH(TABLA <<1)  ; Cargar la parte alta de la dirección de la tabla 0
+	LDI ZL, LOW(TABLA <<1)   ; Cargar la parte baja de la dirección de la tabla 0
+	ADD ZL, R23     ; Sumar R23 al puntero de la tabla
+	LPM R25, Z      ; Leer el valor de la tabla y almacenarlo en R25
+	OUT PORTD, R25  ; Salida del valor almacenado en R25 en el puerto D
+	INC R23         ; Incrementar R23
+	LDI R21, 1     ; Cargar 1 en R21
+	RJMP loop      ; Volver al bucle principal
+
+inc_3:
+	CPI R23, 12     ; Comparar R23 con 12
+	BRSH inc_4      ; Saltar si R23 es mayor o igual a 12
+
+	; Manejo de la tabla 1
+	TABLA1: .DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0E, 0x10, 0x12, 0x14, 0x16  ; Definir la tabla 1
+	LDI ZH, HIGH(TABLA1 <<1)   ; Cargar la parte alta de la dirección de la tabla 1
+	LDI ZL, LOW(TABLA1 <<1)    ; Cargar la parte baja de la dirección de la tabla 1
+	ADD ZL,R23      ; Sumar R23 al puntero de la tabla
+	LPM R25, Z      ; Leer el valor de la tabla y almacenarlo en R25
+	OUT PORTD, R25  ; Salida del valor almacenado en R25 en el puerto D
+	INC R23         ; Incrementar R23
+	rjmp loop      ; Volver al bucle principal
+
+
+	inc_4:
+	CPI R23,14       ; Comparar R23 con 14
+	BRSH inc_5       ; Saltar si R23 es mayor o igual a 14
+
+	CPI R28, 2       ; Comparar R28 con 2
+	BREQ r280        ; Saltar si R28 es igual a 2
+
+	; Manejo de la tabla 2
+	TABLA2: .DB 0x18, 0x1A   ; Definir la tabla 2
+	LDI ZH, HIGH(TABLA2 <<1)  ; Cargar la parte alta de la dirección de la tabla 2
+	LDI ZL, LOW(TABLA2 <<1)   ; Cargar la parte baja de la dirección de la tabla 2
+	ADD ZL, R28      ; Sumar R28 al puntero de la tabla
+	LPM R25, Z       ; Leer el valor de la tabla y almacenarlo en R25
+	OUT PORTD, R25   ; Salida del valor almacenado en R25 en el puerto D
+	INC R23          ; Incrementar R23
+	INC R28          ; Incrementar R28
+	RJMP loop        ; Volver al bucle principal
+	
+r280: 
+	LDI R28, 0     ; Cargar 0 en R28
+	RJMP inc_4     ; Volver a inc_4
+
+inc_5:
+	CPI R23, 15     ; Comparar R23 con 15
+	BRSH inc_6      ; Saltar si R23 es mayor o igual a 15
+	CPI R26, 1      ; Comparar R26 con 1
+	BREQ inc_6      ; Saltar si R26 es igual a 1
+
+	LDI R28, 2      ; Cargar 2 en R28
+	TABLA3: .DB 0x00, 0x00, 0x1C  ; Definir la tabla 3
+	LDI ZH, HIGH(TABLA3 <<1)  ; Cargar la parte alta de la dirección de la tabla 3
+	LDI ZL, LOW(TABLA3 <<1)   ; Cargar la parte baja de la dirección de la tabla 3
+	ADD ZL, R28      ; Sumar R28 al puntero de la tabla
+	LPM R25, Z       ; Leer el valor de la tabla y almacenarlo en R25
+	OUT PORTD, R25   ; Salida del valor almacenado en R25 en el puerto D
+	INC R23          ; Incrementar R23
+	RJMP loop       ; Volver al bucle principal
+
+	inc_6:
+	TABLA4: .DB 0x00, 0x1E  ; Definir la tabla 4
+	LDI ZH, HIGH(TABLA4 <<1)  ; Cargar la parte alta de la dirección de la tabla 4
+	LDI ZL, LOW(TABLA4 <<1)   ; Cargar la parte baja de la dirección de la tabla 4
+	ADD ZL, R29      ; Sumar R29 al puntero de la tabla
+	LPM R25, Z       ; Leer el valor de la tabla y almacenarlo en R25
+	OUT PORTD, R25   ; Salida
+		SBI PIND, PD7      ; Establecer el bit PD7 del puerto D
+	INC R23            ; Incrementar R23
+	CPI R23, 16        ; Comparar R23 con 15
+	BRSH rest         ; Saltar si R23 es mayor o igual a 15
+
+	rest: 
+		LDI R23, 15     ; Cargar 15 en R23
+		LDI R28, 2      ; Cargar 2 en R28
+		CLR R26         ; Borrar R26
+		LDI R21, 0      ; Cargar 0 en R21
+	RJMP loop          ; Salto incondicional a la etiqueta loop
+
+RJMP loop            ; Salto incondicional a la etiqueta loop
+
+dec_1:
+	LDI R16, 255       ; Cargar el valor máximo de un registro de 8 bits en R16
+
+delay6: 
+	DEC R16            ; Decrementar el registro R16
+	BRNE delay6       ; Saltar si R16 no es igual a cero
+LDI R16, 255           ; Cargar el valor máximo de un registro de 8 bits nuevamente
+delay7:
+	DEC R16            ; Decrementar el registro R16
+	BRNE delay7       ; Saltar si R16 no es igual a cero
+LDI R16, 255           ; Cargar el valor máximo de un registro de 8 bits nuevamente
+delay8: 
+	DEC R16            ; Decrementar el registro R16
+	BRNE delay8       ; Saltar si R16 no es igual a cero
+	
+SBIS PINB, PB1        ; Saltar si el pin PB1 está en alto
+RJMP dec_1           ; Volver a dec_1
+
+CPI R23, 16            ; Comparar R23 con 16
+BRLO dec_2           ; Saltar si R23 es menor que 16
+
+dec_2:  
+	CPI R23, 15           ; Comparar R23 con 15
+	BRLO dec_3          ; Saltar si R23 es menor que 15
+
+	TABLA41: .DB 0x00, 0x1C      ; Definir la tabla41
+	LDI ZH, HIGH(TABLA41 <<1)    ; Cargar la parte alta de la dirección de la tabla41
+	LDI ZL, LOW(TABLA41 <<1)     ; Cargar la parte baja de la dirección de la tabla41
+	ADD ZL, R29            ; Sumar R29 al puntero de la tabla41
+	LPM R25, Z             ; Leer el valor de la tabla41 y almacenarlo en R25
+	OUT PORTD, R25        ; Salida del valor almacenado en R25 en el puerto D
+	CBI PIND, PD7         ; Limpiar el bit PD7 en el puerto D
+	DEC R23               ; Decrementar R23
+	DEC R28               ; Decrementar R28
+	LDI R26, 1            ; Cargar 1 en R26
+	RJMP loop             ; Volver al bucle principal
+
+		dec_3:                        ; Etiqueta dec_3
+		CPI R23, 13               ; Compara R23 con 13
+		BRLO dec_4               ; Salta si R23 es menor que 13
+
+		TABLA21: .DB 0x18, 0x1A   ; Define la tabla21
+		LDI ZH, HIGH(TABLA21 <<1)  ; Carga la parte alta de la dirección de la tabla21
+		LDI ZL, LOW(TABLA21 <<1)   ; Carga la parte baja de la dirección de la tabla21
+		ADD ZL, R28                ; Suma R28 al puntero de la tabla21
+		LPM R25, Z                 ; Lee el valor de la tabla21 y lo almacena en R25
+		OUT PORTD, R25             ; Salida del valor almacenado en R25 en el puerto D
+		DEC R23                    ; Decrementa R23
+		DEC R28                    ; Decrementa R28
+		CPI R28, 0                 ; Compara R28 con 0
+		BRLT qt                   ; Salta si R28 es menor que 0
+		LDI R26, 0                 ; Carga 0 en R26
+		RJMP loop                  ; Salto incondicional a la etiqueta loop
+		qt:                         ; Etiqueta qt
+			CLR R28                  ; Borra R28
+			RJMP loop               ; Salto incondicional a la etiqueta loop
+
+	dec_4:                        ; Etiqueta dec_4
+		CPI R21, 1                 ; Compara R21 con 1
+		BREQ de                   ; Salta si R21 es igual a 1
+		CPI R23, 6                 ; Compara R23 con 6
+		BRLO dec_5                ; Salta si R23 es menor que 6
+
+		DEC R23                    ; Decrementa R23
+		TABLA18: .DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A , 0x0C, 0x0E, 0x10, 0x12, 0x14, 0x16, 0x18, 0x1A  ; Define la tabla18
+		LDI ZH, HIGH(TABLA18 <<1)   ; Carga la parte alta de la dirección de la tabla18
+		LDI ZL, LOW(TABLA18 <<1)    ; Carga la parte baja de la dirección de la tabla18
+		ADD ZL, R23                  ; Suma R23 al puntero de la tabla18
+		LPM R25, Z                   ; Lee el valor de la tabla18 y lo almacena en R25
+		OUT PORTD, r25              ; Salida del valor almacenado en R25 en el puerto D
+		RJMP loop                   ; Salto incondicional a la etiqueta loop
+
+		de:                          ; Etiqueta de
+			DEC R23                    ; Decrementa R23
+			LDI R21, 0                 ; Carga 0 en R21
+			rjmp dec_5                ; Salto incondicional a la etiqueta dec_5
+
+	dec_5:                        ; Etiqueta dec_5
+		CPI R23, 1                  ; Compara R23 con 1
+		BREQ reset                ; Salta si R23 es igual a 1
+
+		TABLA14: .DB 0x00, 0x01, 0x02, 0x04, 0x06, 0x08 ; Define la tabla14
+		LDI ZH, HIGH(TABLA14 <<1)      ; Carga la parte alta de la dirección de la tabla14
+		LDI ZL, LOW(TABLA14 <<1)       ; Carga la parte baja de la dirección de la tabla14
+		ADD ZL, R23                    ; Suma R23 al puntero de la tabla14
+		LPM R25, Z                     ; Lee el valor de la tabla14 y lo almacena en R25
+		OUT PORTD, R25                 ; Salida del valor almacenado en R25 en el puerto D
+		DEC R23                        ; Decrementa R23
+		RJMP loop                      ; Salto incondicional a la etiqueta loop
+
+	reset:                         ; Etiqueta reset
+		LDI R31, 0b00000000           ; Carga 0b11111100 en R31
+		OUT PORTD, R31                 ; Salida del valor almacenado en R31 en el puerto D
+		LDI R23, 1                     ; Carga 1 en R23
+		LDI R28, 0                     ; Carga 0 en R28
+		LDI R26, 0                     ; Carga 0 en R26
+		LDI R21, 0                     ; Carga 0 en R21
+
+		RJMP loop                      ; Salto incondicional a la etiqueta loop
+
+	RJMP loop                         ;  Salto incondicional a la etiqueta loop
